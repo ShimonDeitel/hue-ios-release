@@ -1,141 +1,239 @@
 import Foundation
 import SwiftData
 
-/// One logic-grid puzzle: people (rows) matched one-to-one to an ordered attribute (cols),
-/// pinned down by a set of clues. `solution[r]` is the column index for row r.
-struct Puzzle: Codable, Identifiable, Equatable {
-    let id: Int
-    let size: Int
-    let rowCategory: String
-    let colCategory: String
-    let rows: [String]
-    let cols: [String]
-    let solution: [Int]
-    let clues: [String]
-}
+// MARK: - SwiftData Models
 
-/// The bundled puzzle bank. Daily puzzles are size 5; expert (Pro) are size 6. The puzzle for a
-/// given day is chosen deterministically from the date, so everyone gets the same one.
-enum PuzzleBank {
-    private struct Bank: Codable { let version: Int; let puzzles: [Puzzle] }
-
-    static let all: [Puzzle] = load()
-    static var daily: [Puzzle] { all.filter { $0.size == 5 } }
-    static var expert: [Puzzle] { all.filter { $0.size == 6 } }
-
-    private static func load() -> [Puzzle] {
-        guard let url = Bundle.main.url(forResource: "lattice_puzzles", withExtension: "json"),
-              let data = try? Data(contentsOf: url),
-              let bank = try? JSONDecoder().decode(Bank.self, from: data) else { return [] }
-        return bank.puzzles
-    }
-
-    /// Days since the epoch, used as a stable per-day index.
-    private static func epochDay(_ date: Date) -> Int {
-        let cal = Calendar.current
-        let start = cal.startOfDay(for: date)
-        return Int((start.timeIntervalSince1970 / 86_400).rounded(.down))
-    }
-
-    static func index(for date: Date, count: Int) -> Int {
-        guard count > 0 else { return 0 }
-        let d = epochDay(date)
-        return ((d % count) + count) % count
-    }
-
-    static func today(for date: Date = .now) -> Puzzle? {
-        let d = daily; guard !d.isEmpty else { return nil }
-        return d[index(for: date, count: d.count)]
-    }
-
-    static func expertToday(for date: Date = .now) -> Puzzle? {
-        let e = expert; guard !e.isEmpty else { return nil }
-        return e[index(for: date, count: e.count)]
-    }
-
-    /// The daily puzzle for a day N days back (Pro archive).
-    static func daily(daysAgo: Int, from date: Date = .now) -> Puzzle? {
-        let d = daily; guard !d.isEmpty else { return nil }
-        let day = Calendar.current.date(byAdding: .day, value: -daysAgo, to: date) ?? date
-        return d[index(for: day, count: d.count)]
-    }
-
-    static func dateKey(for date: Date = .now) -> String {
-        let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
-        return String(format: "%04d-%02d-%02d", c.year ?? 2026, c.month ?? 1, c.day ?? 1)
-    }
-}
-
-/// A single cell's mark in the grid.
-enum Mark: Int { case blank = 0, yes, no }
-
-/// Mutable state for one play session: an n×n grid of marks plus solve detection.
-final class GridState: ObservableObject {
-    let puzzle: Puzzle
-    @Published var marks: [[Mark]]
-    @Published var hintedRow: Int? = nil
-
-    init(_ p: Puzzle) {
-        puzzle = p
-        marks = Array(repeating: Array(repeating: .blank, count: p.size), count: p.size)
-    }
-
-    /// Tap cycles blank → yes → no → blank. Placing a YES auto-marks the rest of that row and
-    /// column NO (one-to-one matching), the way players naturally fill a logic grid.
-    func cycle(_ r: Int, _ c: Int) {
-        let n = puzzle.size
-        let next: Mark = marks[r][c] == .blank ? .yes : (marks[r][c] == .yes ? .no : .blank)
-        marks[r][c] = next
-        if next == .yes {
-            for cc in 0..<n where cc != c && marks[r][cc] != .no { marks[r][cc] = .no }
-            for rr in 0..<n where rr != r && marks[rr][c] != .no { marks[rr][c] = .no }
-        }
-        objectWillChange.send()
-    }
-
-    /// Reveal one correct cell the player hasn't placed yet (Pro hint).
-    func revealHint() {
-        let n = puzzle.size
-        for r in 0..<n where marks[r][puzzle.solution[r]] != .yes {
-            for c in 0..<n { marks[r][c] = (c == puzzle.solution[r]) ? .yes : .no }
-            hintedRow = r
-            objectWillChange.send()
-            return
-        }
-    }
-
-    var placedCount: Int {
-        (0..<puzzle.size).reduce(0) { acc, r in
-            acc + ((0..<puzzle.size).contains { marks[r][$0] == .yes } ? 1 : 0)
-        }
-    }
-
-    var isComplete: Bool { placedCount == puzzle.size }
-
-    var isSolved: Bool {
-        for r in 0..<puzzle.size {
-            let yes = (0..<puzzle.size).filter { marks[r][$0] == .yes }
-            if yes.count != 1 || yes[0] != puzzle.solution[r] { return false }
-        }
-        return true
-    }
-}
-
-/// One recorded attempt at a daily (or expert) grid. Local-only; defaults + no unique constraints
-/// keep it CloudKit-compatible if sync is ever added.
+/// A single daily mood entry: one color hex + optional note and energy level.
 @Model
-final class LatticeResult {
+final class MoodDay {
     var id: UUID = UUID()
-    var dateKey: String = ""
-    var puzzleId: Int = 0
-    var solved: Bool = false
-    var seconds: Double = 0
-    var isExpert: Bool = false
     var date: Date = Date.now
+    var colorHex: String = "#007AFF"
+    var note: String? = nil
+    var energy: Int? = nil
 
-    init(id: UUID = UUID(), dateKey: String = "", puzzleId: Int = 0,
-         solved: Bool = false, seconds: Double = 0, isExpert: Bool = false, date: Date = .now) {
-        self.id = id; self.dateKey = dateKey; self.puzzleId = puzzleId
-        self.solved = solved; self.seconds = seconds; self.isExpert = isExpert; self.date = date
+    init(id: UUID = UUID(), date: Date = .now, colorHex: String, note: String? = nil, energy: Int? = nil) {
+        self.id = id
+        self.date = date
+        self.colorHex = colorHex
+        self.note = note
+        self.energy = energy
+    }
+}
+
+/// A named color palette (default or Pro-only seasonal/custom).
+@Model
+final class ColorPalette {
+    var id: UUID = UUID()
+    var name: String = ""
+    var colorHexes: [String] = []
+    var isPro: Bool = false
+
+    init(id: UUID = UUID(), name: String, colorHexes: [String], isPro: Bool = false) {
+        self.id = id
+        self.name = name
+        self.colorHexes = colorHexes
+        self.isPro = isPro
+    }
+}
+
+// MARK: - Default Palettes
+
+enum DefaultPalettes {
+    static let free = ColorPalette(
+        name: "Classic",
+        colorHexes: ["#FF3B30", "#FF9500", "#FFCC00", "#34C759", "#007AFF", "#AF52DE"],
+        isPro: false
+    )
+    static let autumn = ColorPalette(
+        name: "Autumn",
+        colorHexes: ["#FF6B35", "#F7931E", "#C0392B", "#8B4513", "#D4A017", "#6B4226"],
+        isPro: true
+    )
+    static let ocean = ColorPalette(
+        name: "Ocean",
+        colorHexes: ["#0077B6", "#00B4D8", "#90E0EF", "#023E8A", "#48CAE4", "#ADE8F4"],
+        isPro: true
+    )
+    static let forest = ColorPalette(
+        name: "Forest",
+        colorHexes: ["#1B4332", "#2D6A4F", "#40916C", "#52B788", "#74C69D", "#B7E4C7"],
+        isPro: true
+    )
+    static let dusk = ColorPalette(
+        name: "Dusk",
+        colorHexes: ["#6A0572", "#AB83A1", "#E8B4CB", "#F7C3D0", "#D4A5A5", "#9C6B9E"],
+        isPro: true
+    )
+
+    static var all: [ColorPalette] { [free, autumn, ocean, forest, dusk] }
+}
+
+// MARK: - Calendar helpers
+
+extension Calendar {
+    /// Midnight at the start of a given date.
+    func startOfDayDate(_ date: Date) -> Date {
+        startOfDay(for: date)
+    }
+
+    /// All dates in the given year.
+    func datesInYear(_ year: Int) -> [Date] {
+        var comps = DateComponents(year: year, month: 1, day: 1)
+        guard let start = self.date(from: comps) else { return [] }
+        var result: [Date] = []
+        comps = DateComponents(year: year, month: 12, day: 31)
+        guard let end = self.date(from: comps) else { return [] }
+        var current = start
+        while current <= end {
+            result.append(current)
+            current = date(byAdding: .day, value: 1, to: current) ?? current
+        }
+        return result
+    }
+
+    func isSameDay(_ a: Date, _ b: Date) -> Bool {
+        isDate(a, inSameDayAs: b)
+    }
+
+    func yearOf(_ date: Date) -> Int {
+        component(.year, from: date)
+    }
+
+    func monthOf(_ date: Date) -> Int {
+        component(.month, from: date)
+    }
+}
+
+// MARK: - AppModel
+
+@MainActor
+final class AppModel: ObservableObject {
+    let container: ModelContainer
+    weak var store: Store?
+
+    @Published private(set) var allEntries: [MoodDay] = []
+    @Published private(set) var streak: Int = 0
+    @Published private(set) var todayEntry: MoodDay? = nil
+    @Published private(set) var palettes: [ColorPalette] = []
+
+    init(container: ModelContainer) {
+        self.container = container
+        reload()
+    }
+
+    static func makeContainer() -> ModelContainer {
+        let schema = Schema([MoodDay.self, ColorPalette.self])
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        do {
+            return try ModelContainer(for: schema, configurations: [config])
+        } catch {
+            let fallback = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+            return (try? ModelContainer(for: schema, configurations: [fallback]))!
+        }
+    }
+
+    func reload() {
+        let ctx = container.mainContext
+        let entryDesc = FetchDescriptor<MoodDay>(sortBy: [SortDescriptor(\.date, order: .reverse)])
+        let paletteDesc = FetchDescriptor<ColorPalette>()
+        allEntries = (try? ctx.fetch(entryDesc)) ?? []
+        palettes = (try? ctx.fetch(paletteDesc)) ?? []
+
+        // Seed default palettes if missing
+        if palettes.isEmpty {
+            for p in DefaultPalettes.all {
+                ctx.insert(p)
+            }
+            try? ctx.save()
+            palettes = (try? ctx.fetch(paletteDesc)) ?? []
+        }
+
+        // Compute today entry
+        let cal = Calendar.current
+        todayEntry = allEntries.first { cal.isSameDay($0.date, .now) }
+
+        // Compute streak
+        streak = computeStreak()
+    }
+
+    func refresh() { reload() }
+
+    // MARK: - Entry management
+
+    /// Save or update today's mood entry with the given color hex.
+    func logMood(colorHex: String, note: String? = nil, energy: Int? = nil) {
+        let ctx = container.mainContext
+        let cal = Calendar.current
+        if let existing = allEntries.first(where: { cal.isSameDay($0.date, .now) }) {
+            existing.colorHex = colorHex
+            if let n = note { existing.note = n }
+            if let e = energy { existing.energy = e }
+        } else {
+            let entry = MoodDay(date: .now, colorHex: colorHex, note: note, energy: energy)
+            ctx.insert(entry)
+        }
+        try? ctx.save()
+        reload()
+    }
+
+    /// All entries for a given month, keyed by calendar day.
+    func entriesForMonth(year: Int, month: Int) -> [MoodDay] {
+        let cal = Calendar.current
+        return allEntries.filter {
+            cal.component(.year, from: $0.date) == year &&
+            cal.component(.month, from: $0.date) == month
+        }
+    }
+
+    /// All entries for a given year, keyed by day-of-year.
+    func entriesForYear(_ year: Int) -> [Date: MoodDay] {
+        let cal = Calendar.current
+        var dict: [Date: MoodDay] = [:]
+        for entry in allEntries {
+            if cal.component(.year, from: entry.date) == year {
+                let day = cal.startOfDay(for: entry.date)
+                dict[day] = entry
+            }
+        }
+        return dict
+    }
+
+    /// Years that have at least one entry.
+    var yearsWithEntries: [Int] {
+        let cal = Calendar.current
+        let years = Set(allEntries.map { cal.component(.year, from: $0.date) })
+        return Array(years).sorted()
+    }
+
+    func deleteAllData() {
+        let ctx = container.mainContext
+        for entry in allEntries { ctx.delete(entry) }
+        try? ctx.save()
+        reload()
+    }
+
+    // MARK: - Streak
+
+    private func computeStreak() -> Int {
+        let cal = Calendar.current
+        var streak = 0
+        var checkDate = cal.startOfDay(for: .now)
+        // If today has no entry yet, still allow checking back from yesterday
+        let hasTodayEntry = allEntries.contains { cal.isSameDay($0.date, checkDate) }
+        if !hasTodayEntry {
+            guard let yesterday = cal.date(byAdding: .day, value: -1, to: checkDate) else { return 0 }
+            checkDate = yesterday
+        }
+        while true {
+            if allEntries.contains(where: { cal.isSameDay($0.date, checkDate) }) {
+                streak += 1
+                guard let prev = cal.date(byAdding: .day, value: -1, to: checkDate) else { break }
+                checkDate = prev
+            } else {
+                break
+            }
+        }
+        return streak
     }
 }

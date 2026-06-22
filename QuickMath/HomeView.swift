@@ -1,165 +1,250 @@
 import SwiftUI
+import SwiftData
 
-/// The hub: today's logic grid, a Play button, the daily streak, lifetime stats, and Pro entry
-/// points (archive + an expert grid each day).
 struct HomeView: View {
+    var forceScreen: String? = nil
+
     @EnvironmentObject var appModel: AppModel
     @EnvironmentObject var store: Store
 
-    var forceScreen: String? = nil
-
-    @State private var active: PlaySpec?
     @State private var showSettings = false
     @State private var showPaywall = false
-    @State private var showArchive = false
+    @State private var showInsights = false
+    @State private var showNoteSheet = false
+    @State private var pendingNote: String = ""
+    @State private var pendingColor: String? = nil
+
+    // Use Classic palette always for the free tier; allow Pro palettes later
+    private var activePalette: ColorPalette {
+        appModel.palettes.first(where: { !$0.isPro }) ?? DefaultPalettes.free
+    }
 
     var body: some View {
         NavigationStack {
             ZStack {
                 QMBackground()
                 ScrollView {
-                    VStack(spacing: 22) {
-                        header
+                    VStack(spacing: 28) {
+                        // Header metrics
+                        HStack(spacing: 12) {
+                            MetricTile(value: "\(appModel.streak)", label: "Day Streak")
+                            MetricTile(value: "\(appModel.allEntries.count)", label: "Total Days")
+                        }
+                        .padding(.horizontal)
+
+                        // Today's tile
                         todayCard
-                        statsRow
-                        proRow
+
+                        // This month mini grid
+                        monthGridSection
+
+                        // Pro insight tile
+                        proInsightTile
                     }
-                    .padding()
-                    .padding(.bottom, 24)
+                    .padding(.vertical, 16)
                 }
             }
-            .navigationTitle("Lattice")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Hue")
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { Haptics.tap(); showSettings = true } label: {
-                        Image(systemName: "gearshape").foregroundStyle(Color.qmAccent)
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        Haptics.tap()
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .foregroundStyle(Color.qmAccent)
                     }
-                    .accessibilityLabel("Settings")
                 }
             }
-            .tint(Color.qmAccent)
-            .fullScreenCover(item: $active) { spec in
-                GridView(puzzle: spec.puzzle, isExpert: spec.isExpert)
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
+                    .environmentObject(appModel)
+                    .environmentObject(store)
             }
-            .sheet(isPresented: $showSettings) { SettingsView() }
-            .sheet(isPresented: $showPaywall) { PaywallView() }
-            .sheet(isPresented: $showArchive) { ArchiveView() }
-            .onAppear { appModel.refreshTodayIfNeeded() }
+            .sheet(isPresented: $showPaywall) {
+                PaywallView()
+                    .environmentObject(store)
+            }
+            .sheet(isPresented: $showInsights) {
+                InsightsView()
+                    .environmentObject(appModel)
+                    .environmentObject(store)
+            }
+            .sheet(isPresented: $showNoteSheet) {
+                noteSheet
+            }
+        }
+        .onAppear {
+            if forceScreen == "insights" { showInsights = true }
+            if forceScreen == "paywall" { showPaywall = true }
         }
     }
 
-    private var header: some View {
-        VStack(spacing: 6) {
-            Text(dateHeadline).font(.subheadline).foregroundStyle(.secondary)
-            HStack(spacing: 6) {
-                Image(systemName: "flame.fill").foregroundStyle(Color.qmAccent)
-                Text("\(appModel.currentStreak) day streak").font(.headline)
-            }
-        }
-        .padding(.top, 8)
-    }
+    // MARK: - Today Card
 
-    @ViewBuilder
     private var todayCard: some View {
-        VStack(spacing: 16) {
-            Text("TODAY'S GRID")
-                .font(.caption.weight(.semibold)).foregroundStyle(.secondary).tracking(1.5)
-            if let p = appModel.today {
-                Text("\(p.rows.count) \(p.rowCategory.lowercased())s · \(p.colCategory.lowercased())s")
-                    .font(.headline)
-                Text("Read the clues. Cross out what can't be, mark what must be.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                if appModel.solvedToday {
-                    Label("Solved today", systemImage: "checkmark.seal.fill")
-                        .font(.subheadline).foregroundStyle(Color.qmCorrect)
-                    Button { play(p, expert: false) } label: {
-                        Text("Play Again").frame(maxWidth: .infinity).padding(.vertical, 4)
+        VStack(alignment: .leading, spacing: 16) {
+            Text("How do you feel today?")
+                .font(.headline)
+                .foregroundStyle(.primary)
+
+            if let entry = appModel.todayEntry {
+                // Already logged
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(Color(hex: entry.colorHex))
+                        .frame(width: 48, height: 48)
+                        .shadow(color: Color(hex: entry.colorHex).opacity(0.3), radius: 8, x: 0, y: 4)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Logged")
+                            .font(.subheadline.weight(.semibold))
+                        if let note = entry.note, !note.isEmpty {
+                            Text(note)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        } else {
+                            Text("Tap a color to change")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    .softButton()
-                } else {
-                    Button { play(p, expert: false) } label: {
-                        Text("Solve Today's Grid").frame(maxWidth: .infinity).padding(.vertical, 4)
+                    Spacer()
+                    // Add/edit note
+                    Button {
+                        pendingNote = entry.note ?? ""
+                        pendingColor = entry.colorHex
+                        showNoteSheet = true
+                    } label: {
+                        Image(systemName: "pencil.circle")
+                            .font(.title2)
+                            .foregroundStyle(Color.qmAccent)
                     }
-                    .prominentButton()
                 }
             } else {
-                Text("Puzzles unavailable.").font(.subheadline).foregroundStyle(.secondary)
+                Text("Tap a color swatch to log your mood.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Color swatches
+            colorSwatches
+        }
+        .qmCard()
+        .padding(.horizontal)
+    }
+
+    private var colorSwatches: some View {
+        let hexes = activePalette.colorHexes
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 6), spacing: 12) {
+            ForEach(hexes, id: \.self) { hex in
+                Button {
+                    Haptics.tap()
+                    appModel.logMood(colorHex: hex)
+                } label: {
+                    Circle()
+                        .fill(Color(hex: hex))
+                        .aspectRatio(1, contentMode: .fit)
+                        .overlay(
+                            Circle()
+                                .strokeBorder(
+                                    appModel.todayEntry?.colorHex == hex ? Color.primary : Color.clear,
+                                    lineWidth: 3
+                                )
+                        )
+                        .shadow(color: Color(hex: hex).opacity(0.25), radius: 4, x: 0, y: 2)
+                }
+            }
+        }
+    }
+
+    // MARK: - Month Grid
+
+    private var monthGridSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            let cal = Calendar.current
+            let now = Date.now
+            let year = cal.yearOf(now)
+            let month = cal.monthOf(now)
+            let entries = appModel.entriesForMonth(year: year, month: month)
+            let monthName = now.formatted(.dateTime.month(.wide).year())
+
+            HStack {
+                Text(monthName)
+                    .font(.headline)
+                Spacer()
+            }
+
+            GridView(year: year, month: month, entries: entries)
+        }
+        .qmCard()
+        .padding(.horizontal)
+    }
+
+    // MARK: - Pro Insight Tile
+
+    private var proInsightTile: some View {
+        Button {
+            Haptics.tap()
+            if store.isPro {
+                showInsights = true
+            } else {
+                showPaywall = true
+            }
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: store.isPro ? "chart.bar.fill" : "lock.fill")
+                    .font(.title2)
+                    .foregroundStyle(Color.qmAccent)
+                    .frame(width: 36)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(store.isPro ? "Your Color History" : "Hue Pro")
+                        .font(.subheadline.weight(.semibold))
+                    Text(store.isPro ? "Multi-year mosaic & weekly insights" : "Mosaic, palettes & insights — $0.99/mo")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .qmCard()
+        .padding(.horizontal)
     }
 
-    private var statsRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Lifetime").font(.headline)
-            HStack(spacing: 12) {
-                MetricTile(value: "\(appModel.longestStreak)", label: "Best streak")
-                MetricTile(value: "\(appModel.totalSolved)", label: "Solved")
-                MetricTile(value: appModel.bestSeconds > 0 ? timeString(appModel.bestSeconds) : "—", label: "Best time")
+    // MARK: - Note Sheet
+
+    private var noteSheet: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                TextEditor(text: $pendingNote)
+                    .frame(minHeight: 120)
+                    .padding(12)
+                    .background(Color.qmCard, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .padding(.horizontal)
+                Spacer()
+            }
+            .padding(.top, 20)
+            .navigationTitle("Add a note")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { showNoteSheet = false }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Save") {
+                        if let color = pendingColor {
+                            appModel.logMood(colorHex: color, note: pendingNote.isEmpty ? nil : pendingNote)
+                        }
+                        showNoteSheet = false
+                    }
+                    .fontWeight(.semibold)
+                }
             }
         }
+        .presentationDetents([.medium])
     }
-
-    @ViewBuilder
-    private var proRow: some View {
-        VStack(spacing: 12) {
-            Button {
-                Haptics.tap()
-                if store.isPro {
-                    if let p = PuzzleBank.expertToday() { play(p, expert: true) }
-                } else { showPaywall = true }
-            } label: {
-                proTile(icon: "brain.head.profile", title: "Expert grid",
-                        subtitle: store.isPro ? "A harder 6×6 grid, fresh daily" : "Pro", locked: !store.isPro)
-            }
-            .buttonStyle(.plain)
-
-            Button {
-                Haptics.tap()
-                if store.isPro { showArchive = true } else { showPaywall = true }
-            } label: {
-                proTile(icon: "calendar", title: "Past grids",
-                        subtitle: store.isPro ? "Replay every previous day" : "Pro", locked: !store.isPro)
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private func proTile(icon: String, title: String, subtitle: String, locked: Bool) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon)
-                .font(.system(size: 20, weight: .semibold)).foregroundStyle(Color.qmAccent).frame(width: 30)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.headline).foregroundStyle(.primary)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Image(systemName: locked ? "lock.fill" : "chevron.right")
-                .font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
-        }
-        .qmCard()
-    }
-
-    private func play(_ p: Puzzle, expert: Bool) {
-        Haptics.tap()
-        active = PlaySpec(puzzle: p, isExpert: expert)
-    }
-
-    private var dateHeadline: String {
-        let f = DateFormatter(); f.dateStyle = .full; f.timeStyle = .none
-        return f.string(from: .now)
-    }
-
-    private func timeString(_ s: Double) -> String {
-        let t = Int(s.rounded()); return String(format: "%d:%02d", t / 60, t % 60)
-    }
-}
-
-/// Identifies the puzzle being played in the full-screen cover.
-struct PlaySpec: Identifiable {
-    let puzzle: Puzzle
-    let isExpert: Bool
-    var id: String { "\(puzzle.id)-\(isExpert)" }
 }
