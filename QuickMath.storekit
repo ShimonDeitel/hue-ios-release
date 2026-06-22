@@ -1,40 +1,53 @@
 {
-  "appPolicies" : {
-    "eula" : "",
-    "policies" : [
+  "appPolicies": {
+    "eula": "",
+    "policies": [
       {
-        "locale" : "en_US",
-        "policyText" : "",
-        "policyURL" : ""
+        "locale": "en_US",
+        "policyText": "",
+        "policyURL": ""
       }
     ]
   },
-  "identifier" : "QUICKMATH_STOREKIT_CONFIG",
-  "nonRenewingSubscriptions" : [],
-  "products" : [
+  "identifier": "LATTICE_STOREKIT_CONFIG",
+  "nonRenewingSubscriptions": [],
+  "products": [],
+  "settings": {
+    "_failTransactionsEnabled": false,
+    "_storeKitErrors": []
+  },
+  "subscriptionGroups": [
     {
-      "displayPrice" : "0.99",
-      "familyShareable" : true,
-      "internalID" : "quickmath_pro_unlock_id",
-      "localizations" : [
+      "id": "lattice_pro_group",
+      "localizations": [],
+      "name": "Lattice Pro",
+      "subscriptions": [
         {
-          "description" : "Unlock every difficulty tier, your full history charts, weak-spot focus drills and sharing. One-time purchase.",
-          "displayName" : "QuickMath Pro",
-          "locale" : "en_US"
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "0.99",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "lattice_pro_monthly_id",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "The full daily logic-grid archive, an expert grid each day, bigger grids, hints and themes.",
+              "displayName": "Lattice Pro",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "lattice_pro_monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Lattice Pro Monthly",
+          "subscriptionGroupID": "lattice_pro_group",
+          "type": "RecurringSubscription"
         }
-      ],
-      "productID" : "quickmath_pro_unlock",
-      "referenceName" : "QuickMath Pro Unlock",
-      "type" : "NonConsumable"
+      ]
     }
   ],
-  "settings" : {
-    "_failTransactionsEnabled" : false,
-    "_storeKitErrors" : []
-  },
-  "subscriptionGroups" : [],
-  "version" : {
-    "major" : 3,
-    "minor" : 0
+  "version": {
+    "major": 3,
+    "minor": 0
   }
 }
