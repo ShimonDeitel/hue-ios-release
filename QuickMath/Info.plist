@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>QuickMath</string>
+	<string>Lattice</string>
 	<key>CFBundleName</key>
-	<string>QuickMath</string>
+	<string>Lattice</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleExecutable</key>
