@@ -6,7 +6,6 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @AppStorage("quickmath.theme") private var themeRaw = AppTheme.system.rawValue
-    @AppStorage("quickmath.haptics") private var hapticsEnabled = true
     @AppStorage("quickmath.reminderOn") private var reminderOn = false
     @AppStorage("quickmath.reminderHour") private var reminderHour = 9
     @AppStorage("quickmath.reminderMinute") private var reminderMinute = 0
@@ -17,14 +16,12 @@ struct SettingsView: View {
 
     private var version: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
-        return "QuickMath \(v)"
+        return "Lattice \(v)"
     }
 
     private var reminderTime: Binding<Date> {
         Binding(
-            get: {
-                Calendar.current.date(from: DateComponents(hour: reminderHour, minute: reminderMinute)) ?? Date()
-            },
+            get: { Calendar.current.date(from: DateComponents(hour: reminderHour, minute: reminderMinute)) ?? Date() },
             set: { newValue in
                 let c = Calendar.current.dateComponents([.hour, .minute], from: newValue)
                 reminderHour = c.hour ?? 9
@@ -39,24 +36,19 @@ struct SettingsView: View {
             Form {
                 proSection
                 appearanceSection
-                drillSection
+                gridSection
                 aboutSection
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
-            }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .tint(Color.qmAccent)
             .sheet(isPresented: $showPaywall) { PaywallView() }
             .alert("Erase Progress?", isPresented: $showDeleteConfirm) {
-                Button("Erase", role: .destructive) {
-                    appModel.deleteAllData()
-                    dismiss()
-                }
+                Button("Erase", role: .destructive) { appModel.deleteAllData(); dismiss() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This permanently erases your drills on this device. This can't be undone.")
+                Text("This permanently erases your solved grids and streak on this device. This can't be undone.")
             }
         }
     }
@@ -66,33 +58,27 @@ struct SettingsView: View {
         Section {
             if store.isPro {
                 HStack {
-                    Label("QuickMath Pro", systemImage: "sparkles")
-                    Spacer()
-                    Text("Unlocked").foregroundStyle(.secondary)
+                    Label("Lattice Pro", systemImage: "sparkles")
+                    Spacer(); Text("Active").foregroundStyle(.secondary)
                 }
             } else {
-                Button {
-                    Haptics.tap(); showPaywall = true
-                } label: {
+                Button { Haptics.tap(); showPaywall = true } label: {
                     HStack {
-                        Label("Unlock QuickMath Pro", systemImage: "sparkles")
-                        Spacer()
-                        Text(store.displayPrice).foregroundStyle(.secondary)
+                        Label("Start Lattice Pro", systemImage: "sparkles")
+                        Spacer(); Text("\(store.displayPrice)/mo").foregroundStyle(.secondary)
                     }
                 }
                 Button("Restore Purchase") {
                     Task {
                         await store.restore()
-                        restoreMessage = store.isPro ? "Restored." : "No previous purchase found."
+                        restoreMessage = store.isPro ? "Restored." : "No active subscription found."
                     }
                 }
-                if let restoreMessage {
-                    Text(restoreMessage).font(.footnote).foregroundStyle(.secondary)
-                }
+                if let restoreMessage { Text(restoreMessage).font(.footnote).foregroundStyle(.secondary) }
             }
         } footer: {
             if !store.isPro {
-                Text("One-time purchase. All difficulty tiers, history charts, weak-spot focus and sharing.")
+                Text("$0.99/month subscription. The expert daily grid, the full archive of past grids, hints and themes. Auto-renews until canceled.")
             }
         }
     }
@@ -106,23 +92,17 @@ struct SettingsView: View {
         }
     }
 
-    private var drillSection: some View {
-        Section("Drill") {
-            Toggle("Haptics", isOn: $hapticsEnabled)
+    private var gridSection: some View {
+        Section("Daily grid") {
             Toggle("Daily reminder", isOn: $reminderOn)
                 .onChange(of: reminderOn) { _, on in
                     if on {
                         Task {
                             let granted = await Reminders.requestAuthorization()
-                            if granted {
-                                Reminders.schedule(hour: reminderHour, minute: reminderMinute)
-                            } else {
-                                reminderOn = false
-                            }
+                            if granted { Reminders.schedule(hour: reminderHour, minute: reminderMinute) }
+                            else { reminderOn = false }
                         }
-                    } else {
-                        Reminders.cancel()
-                    }
+                    } else { Reminders.cancel() }
                 }
             if reminderOn {
                 DatePicker("Time", selection: reminderTime, displayedComponents: .hourAndMinute)
@@ -133,7 +113,8 @@ struct SettingsView: View {
     private var aboutSection: some View {
         Section {
             Button("Erase Progress", role: .destructive) { showDeleteConfirm = true }
-            Link("Privacy Policy", destination: URL(string: "https://shimondeitel.github.io/quickmath-site/privacy.html")!)
+            Link("Terms of Use", destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
+            Link("Privacy Policy", destination: URL(string: "https://shimondeitel.github.io/lattice-site/privacy.html")!)
         } footer: {
             Text(version).frame(maxWidth: .infinity, alignment: .center).padding(.top, 4)
         }
